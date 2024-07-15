@@ -9588,6 +9588,93 @@ GROUP BY
 Order by 
 	customer_id, MonthNumber;
 
+--  Option 1: Data is allocated based off the amount of money at the end of the previous month?
+
+SET SQL_mode = '';
+
+WITH adjusted_amount AS (
+SELECT customer_id, txn_type, 
+EXTRACT(MONTH FROM (txn_date)) AS month_number, 
+MONTHNAME(txn_date) AS month,
+CASE 
+WHEN  txn_type = 'deposit' THEN txn_amount
+ELSE -txn_amount
+END AS amount
+FROM customer_transactions
+),
+balance AS (
+SELECT customer_id, month_number, month,
+SUM(amount) OVER(PARTITION BY customer_id, month_number ORDER BY month_number ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) 
+AS running_balance
+FROM adjusted_amount
+),
+allocation AS (
+SELECT customer_id, month_number,month,
+LAG(running_balance,1) OVER(PARTITION BY customer_id, month_number ORDER BY month_number) AS monthly_allocation
+FROM balance
+)
+SELECT month_number,month,
+SUM(CASE WHEN monthly_allocation < 0 THEN 0 ELSE monthly_allocation END) AS total_allocation
+FROM allocation
+GROUP BY 1,2
+ORDER BY 1,2;
+ 
+-- Option 2: Data is allocated on the average amount of money kept in the account in the previous 30 days
+
+WITH updated_transactions AS (
+SELECT customer_id, txn_type, 
+EXTRACT(MONTH FROM(txn_date)) AS Month_number,
+MONTHNAME(txn_date) AS month,
+CASE
+WHEN txn_type = 'deposit' THEN txn_amount
+ELSE -txn_amount
+END AS amount
+FROM customer_transactions
+),
+balance AS (
+SELECT customer_id, month, month_number,
+SUM(amount) OVER(PARTITION BY customer_id, month_number ORDER BY customer_id, month_number 
+ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_balance
+FROM updated_transactions
+),
+
+avg_running AS(
+SELECT customer_id, month,month_number,
+AVG(running_balance) AS avg_balance
+FROM balance
+GROUP BY 1,2,3
+ORDER BY 1
+)
+SELECT month_number,month, 
+SUM(CASE WHEN avg_balance < 0 THEN 0 ELSE avg_balance END) AS allocation_balance
+FROM avg_running
+GROUP BY 1,2
+ORDER by 1,2;
+
+-- Option 3: Data is updated real-time
+
+WITH updated_transactions AS (
+SELECT customer_id, txn_type,
+EXTRACT(MONTH FROM(txn_date)) AS month_number,
+MONTHNAME(txn_date) AS month,
+CASE
+WHEN txn_type = 'deposit' THEN txn_amount
+ELSE -txn_amount
+END AS amount
+FROM customer_transactions
+),
+balance AS (
+SELECT customer_id, month_number, month, 
+SUM(amount) OVER(PARTITION BY customer_id, month_number ORDER BY customer_id, month_number ASC 
+ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_balance
+FROM updated_transactions
+)
+SELECT month_number, month,
+SUM(CASE WHEN running_balance < 0 THEN 0 ELSE running_balance END) AS total_allocation
+FROM balance
+GROUP BY 1,2
+ORDER BY 1;
+
 Calculate the daily data growth for each customer
 
 WITH adjusted_amount AS (
