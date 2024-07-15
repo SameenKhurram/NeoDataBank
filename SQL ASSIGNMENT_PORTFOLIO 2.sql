@@ -9587,3 +9587,37 @@ GROUP BY
     customer_id, MonthNumber
 Order by 
 	customer_id, MonthNumber;
+
+Calculate the daily data growth for each customer
+
+WITH adjusted_amount AS (
+SELECT customer_id, 
+EXTRACT(MONTH FROM(txn_date)) AS month_number,
+MONTHNAME(txn_date) AS month,
+SUM(CASE 
+WHEN txn_type = 'deposit' THEN txn_amount
+ELSE -txn_amount
+END) AS monthly_amount
+FROM customer_transactions
+GROUP BY 1,2,3
+ORDER BY 1
+),
+interest AS (
+SELECT customer_id, month_number,month, monthly_amount,
+ROUND(((monthly_amount * 6 * 1)/(100 * 12)),2) AS interest
+FROM adjusted_amount
+GROUP BY 1,2,3,4
+ORDER BY 1,2,3
+),
+total_earnings AS (
+SELECT customer_id, month_number, month,
+(monthly_amount + interest) as earnings
+FROM  interest
+GROUP BY 1,2,3,4
+ORDER BY 1,2,3
+)
+SELECT month_number,month,
+SUM(CASE WHEN earnings < 0 THEN 0 ELSE earnings END) AS allocation
+FROM total_earnings
+GROUP BY 1,2
+ORDER BY 1,2;
